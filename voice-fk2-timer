@@ -1,0 +1,235 @@
+substitutions:
+  name: "voice-assistant"
+  friendly_name: "Asistente de Voz"
+  # Fases del asistente
+  voice_assist_idle_phase_id: '1'
+  voice_assist_waiting_for_command_phase_id: '2'
+  voice_assist_listening_for_command_phase_id: '3'
+  voice_assist_thinking_phase_id: '4'
+  voice_assist_replying_phase_id: '5'
+  voice_assist_not_ready_phase_id: '10'
+  voice_assist_error_phase_id: '11'
+
+esphome:
+  name: "${name}"
+  friendly_name: "${friendly_name}"
+  platform: ESP32
+  board: esp32-s3-devkitc-1
+
+esp32:
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
+      CONFIG_SPIRAM: "y"
+      CONFIG_SPIRAM_MODE_OCT: "y"
+      CONFIG_SPIRAM_SPEED_80M: "y"
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+### Configuración de Hardware ###
+i2s_audio:
+  id: audio_bus
+  i2s_lrclk_pin: GPIO35  # INMP441 LRC
+  i2s_bclk_pin: GPIO36   # INMP441 BCK
+  i2s_din_pin: GPIO37    # INMP441 DOUT
+  i2s_dout_pin: GPIO16   # MAX98357 DIN
+  mode: master
+  bits_per_sample: 16
+
+microphone:
+  - platform: i2s_audio
+    id: inmp441_mic
+    i2s_audio_id: audio_bus
+    adc_type: external
+    pdm: false
+    sample_rate: 16000
+
+speaker:
+  - platform: i2s_audio
+    id: max98357_speaker
+    i2s_audio_id: audio_bus
+    mode: mono
+
+### Sonidos ###
+media_player:
+  - platform: speaker
+    id: timer_speaker
+    name: "Timer Speaker"
+    internal: true
+    output: max98357_speaker
+    codec: flac
+    files:
+      - id: timer_finished_sound
+        file: "http://[TU_IP_LOCAL]:[PUERTO]/timer_finished.flac"  # ¡Reemplaza esto!
+        volume: 0.8
+
+### Variables Globales ###
+globals:
+  - id: first_active_timer
+    type: voice_assistant::Timer
+    restore_value: false
+  - id: is_timer_active
+    type: bool
+    restore_value: false
+  - id: voice_assistant_phase
+    type: int
+    restore_value: no
+    initial_value: ${voice_assist_idle_phase_id}
+
+### Interruptores ###
+switch:
+  - platform: template
+    id: timer_ringing
+    name: "Timer Ringing"
+    icon: "mdi:timer-alert"
+    internal: true
+    restore_mode: ALWAYS_OFF
+    on_turn_on:
+      - lambda: id(stop).enable()
+      - media_player.play:
+          id: timer_speaker
+          file: timer_finished_sound
+          announcement: true
+          wait_until_done: false
+      - light.turn_on:
+          id: status_leds
+          effect: "timer_ring_effect"
+    on_turn_off:
+      - lambda: id(stop).disable()
+      - media_player.stop:
+          announcement: true
+      - light.turn_off: status_leds
+
+### LEDs WS2812B ###
+light:
+  - platform: fastled_clockless
+    id: status_leds
+    chipset: WS2812B
+    pin: GPIO38
+    num_leds: 3
+    rgb_order: GRB
+    effects:
+      - lambda:
+          name: "timer_tick_effect"
+          update_interval: 0.1s
+          lambda: |-
+            if (id(is_timer_active)) {
+              float progress = id(first_active_timer).seconds_left / float(id(first_active_timer).total_seconds);
+              for (int i = 0; i < size(); i++) {
+                it[i] = (i <= progress * size()) ? esp8266::Color(0, 255, 0) : esp8266::Color(0, 0, 0);
+              }
+            }
+      - lambda:
+          name: "timer_ring_effect"
+          update_interval: 0.5s
+          lambda: |-
+            static bool toggle = false;
+            toggle = !toggle;
+            for (int i = 0; i < size(); i++) {
+              it[i] = toggle ? esp8266::Color(255, 0, 0) : esp8266::Color(0, 0, 0);
+            }
+
+### Scripts ###
+scripts:
+  - id: ring_timer
+    mode: restart
+    then:
+      - switch.turn_on: timer_ringing
+      - delay: 15min
+      - switch.turn_off: timer_ringing
+
+  - id: check_timers
+    then:
+      - lambda: |-
+          auto timers = id(va).get_timers();
+          id(is_timer_active) = !timers.empty();
+          if (id(is_timer_active)) {
+            id(first_active_timer) = timers.begin()->second;
+          }
+
+### Wake Words ###
+micro_wake_word:
+  id: mww
+  microphone: inmp441_mic
+  models:
+    - model: hey_jarvis
+      id: hey_jarvis
+      sensitivity: 0.9
+    - model: https://github.com/kahrendt/microWakeWord/releases/download/stop/stop.json
+      id: stop
+      internal: true
+  on_wake_word_detected:
+    - if:
+        condition:
+          lambda: return id(mww).get_wake_word_id() == "stop" && id(timer_ringing).state;
+        then:
+          - switch.turn_off: timer_ringing
+
+### Botón Físico ###
+binary_sensor:
+  - platform: gpio
+    id: physical_button
+    pin:
+      number: GPIO0
+      mode: INPUT_PULLUP
+    on_multi_click:
+      - timing:
+          - ON for at most 1s
+          - OFF for at least 0.25s
+        then:
+          - voice_assistant.start: va
+      - timing:
+          - ON for at least 3s
+        then:
+          - restart: hard
+
+### Voice Assistant ###
+voice_assistant:
+  - platform: home_assistant
+    id: va
+    microphone: inmp441_mic
+    speaker: max98357_speaker
+    use_wake_word: false
+    on_timer_started:
+      - script.execute: check_timers
+      - light.turn_on:
+          id: status_leds
+          effect: "timer_tick_effect"
+    on_timer_finished:
+      - script.execute: ring_timer
+    on_timer_cancelled:
+      - switch.turn_off: timer_ringing
+    on_timer_tick:
+      - script.execute: check_timers
+    on_error:
+      - light.turn_on:
+          id: status_leds
+          red: 100%
+          green: 0%
+          blue: 0%
+          flash: 0.5s
+      - delay: 2s
+      - light.turn_off: status_leds
+
+### Configuración de Red ###
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "${friendly_name} Fallback"
+    password: !secret fallback_password
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  password: !secret ota_password
+
+logger:
+  level: DEBUG
