@@ -1,0 +1,1 @@
+ffmpeg -i mi_sonido.mp3 -acodec flac -ar 16000 timer_finished.flac
