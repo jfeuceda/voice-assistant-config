@@ -122,7 +122,7 @@ light:
             if (id(is_timer_active)) {
               float progress = id(first_active_timer).seconds_left / float(id(first_active_timer).total_seconds);
               for (int i = 0; i < size(); i++) {
-                it[i] = (i <= progress * size()) ? esp8266::Color(0, 255, 0) : esp8266::Color(0, 0, 0);
+                it[i] = (i <= progress * size()) ? esphome::Color(0, 255, 0) : esphome::Color(0, 0, 0);
               }
             }
       - lambda:
