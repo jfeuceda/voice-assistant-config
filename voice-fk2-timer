@@ -18,7 +18,7 @@ esphome:
 
 esp32:
   variant: esp32s3
-  flash_size: 16MB
+  flash_size: 8MB
   framework:
     type: esp-idf
     sdkconfig_options:
