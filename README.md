@@ -10,11 +10,11 @@ Mi configurarcion de prueba para un voice assistant utlizando un ESP32-S3 N8R2, 
 - Push button
 ## Conexiones
 ### INP441
-LRC	GPIO35	LRCLK (WS)	Word Select
-BCK	GPIO36	BCLK (SCK)	Reloj serial
-DOUT	GPIO37	DIN (SD)	Datos del micrófono
-VDD	3.3V	Alimentación	Usar regulador si > 3.3V
-GND	GND	Tierra
+- LRC	GPIO35	LRCLK (WS)	Word Select
+- BCK	GPIO36	BCLK (SCK)	Reloj serial
+- DOUT	GPIO37	DIN (SD)	Datos del micrófono
+- VDD	3.3V	Alimentación	Usar regulador si > 3.3V
+- GND	GND	Tierra
 ### MAX98357
 DIN	GPIO16	DOUT (Datos I2S)	Datos al amplificador
 LRC	GPIO17	LRCLK (WS)	Opcional*
